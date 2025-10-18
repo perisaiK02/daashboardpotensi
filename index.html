@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard Potensi & Realisasi Bogor</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<style>
+body { font-family:"Segoe UI", Arial, sans-serif; background:#f4f6f9; margin:0; padding:0; color:#333; }
+header { background:linear-gradient(90deg,#004aad,#0074e0); color:white; text-align:center; padding:20px; box-shadow:0 2px 6px rgba(0,0,0,0.2);}
+header h1 { margin:0; font-size:1.6em;}
+.container { max-width:1200px; margin:20px auto; background:white; padding:20px 30px; border-radius:10px; box-shadow:0 4px 12px rgba(0,0,0,0.1);}
+h2 { text-align:center; margin-top:0;}
+table { width:100%; border-collapse:collapse; margin-top:20px;}
+th, td { text-align:center; padding:10px; border-bottom:1px solid #ddd;}
+th { background:#0074e0; color:white; position:sticky; top:0;}
+tr:hover { background:#f1f7ff;}
+.progress-bar { width:100%; background:#eaeaea; border-radius:8px; overflow:hidden; height:14px;}
+.progress-fill { height:100%; text-align:right; padding-right:5px; color:white; font-size:11px; font-weight:bold; transition:width 0.5s ease-in-out;}
+#map { height:500px; margin-top:20px;}
+footer { text-align:center; margin:30px 0; color:#777; font-size:0.9em;}
+.refresh-btn { float:right; background:#0074e0; color:white; border:none; border-radius:5px; padding:7px 14px; cursor:pointer; font-size:14px;}
+.refresh-btn:hover { background:#005bb5;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📊 Dashboard Potensi & Realisasi Bogor</h1>
+</header>
+
+<div class="container">
+  <button class="refresh-btn" onclick="loadData()">⟳ Refresh</button>
+
+  <h2>Data Potensi, Realisasi, dan Sisa</h2>
+  <table id="dataTable">
+    <thead>
+      <tr>
+        <th>Kecamatan</th>
+        <th>Potensi</th>
+        <th>Realisasi</th>
+        <th>Sisa</th>
+        <th>Persentase</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <h2>Peta Kecamatan Bogor</h2>
+  <div id="map"></div>
+</div>
+
+<footer>
+© 2025 BPJAMSOSTEK - Monitoring Akuisisi Potensi | Dibuat dengan ❤️
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<script>
+const scriptUrl = "https://script.google.com/macros/s/AKfycbw2-Bq8WVmvM2gf0PzxKjzd1sJYwhv6V9Ru8wW93kaJqaNMB8PwPbLdKwa1XKXqMbpj/exec?action=getPotensiRealisasi";
+
+// GeoJSON publik raw GitHub
+const geoJsonUrl = "https://raw.githubusercontent.com/perisaik02/daashboardpotensi/main/data/bogor_kecamatan.geojson";
+
+let map, geoLayer;
+
+async function loadData() {
+  const tableBody = document.querySelector("#dataTable tbody");
+  tableBody.innerHTML = "<tr><td colspan='5'>Memuat data...</td></tr>";
+
+  try {
+    const res = await fetch(scriptUrl);
+    const result = await res.json();
+    if(result.status !== "ok") {
+      tableBody.innerHTML = `<tr><td colspan='5'>Gagal memuat data: ${result.message}</td></tr>`;
+      return;
+    }
+
+    const data = result.data;
+    tableBody.innerHTML = "";
+    const sisaMap = {};
+
+    data.forEach(row=>{
+      const persen = row.potensi>0 ? (row.realisasi/row.potensi)*100 : 0;
+      const warna = persen>=80 ? "#28a745": persen>=50 ? "#ffc107":"#dc3545";
+
+      tableBody.innerHTML += `
+      <tr>
+        <td>${row.kecamatan}</td>
+        <td>${row.potensi}</td>
+        <td>${row.realisasi}</td>
+        <td>${row.sisa}</td>
+        <td>
+          <div class="progress-bar">
+            <div class="progress-fill" style="width:${persen.toFixed(1)}%; background:${warna};">
+              ${persen.toFixed(1)}%
+            </div>
+          </div>
+        </td>
+      </tr>`;
+
+      sisaMap[row.kecamatan] = row.sisa;
+    });
+
+    renderMap(sisaMap);
+
+  } catch(err){
+    tableBody.innerHTML = `<tr><td colspan='5'>Error: ${err.message}</td></tr>`;
+  }
+}
+
+function renderMap(sisaMap){
+  if(!map){
+    map = L.map('map').setView([-6.6,106.8],11);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{ attribution:'© OpenStreetMap'}).addTo(map);
+  }
+  if(geoLayer) geoLayer.remove();
+
+  fetch(geoJsonUrl)
+    .then(res=>res.json())
+    .then(geojson=>{
+      geojson.features.forEach(f=>{
+        const nama = f.properties.name;
+        f.properties.sisa = sisaMap[nama];
+      });
+
+      geoLayer = L.geoJSON(geojson,{
+        style: f=>{
+          const s = f.properties.sisa;
+          return {
+            fillColor: s===undefined ? '#ffffff00' : s===0 ? '#28a745' : s<50 ? '#ffc107' : '#dc3545',
+            weight:1, color:'#333', fillOpacity:0.7
+          };
+        },
+        onEachFeature: (f,l)=>{
+          l.bindTooltip(`${f.properties.name}<br>Sisa: ${f.properties.sisa||'-'}`);
+        }
+      }).addTo(map);
+    });
+}
+
+window.onload = loadData;
+</script>
+
+</body>
+</html>
